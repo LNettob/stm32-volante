@@ -1,0 +1,79 @@
+#include <WiFi.h>
+
+// --- Configurações de Rede ---
+const char* ssid = "iPhone";
+const char* password = "luquinhas";
+const uint16_t server_port = 80;
+
+// --- Configuração da comunicação com a STM32 ---
+// Usaremos a porta Serial principal (GPIO1/TX0, GPIO3/RX0)
+// Se quiser usar outra (Serial1 ou Serial2), mude aqui e nos pinos.
+#define STM32_SERIAL Serial
+const long stm32_baud_rate = 115200;
+
+// --- Objetos de Rede ---
+WiFiServer server(server_port);
+WiFiClient client;
+
+void setup() {
+    // Inicia a comunicação serial para debug no Monitor Serial
+    Serial.begin(115200);
+    delay(100);
+
+    // Se estiver usando uma porta Serial diferente para a STM32, inicie-a aqui.
+    // Ex: Serial2.begin(stm32_baud_rate, SERIAL_8N1, RX_PIN, TX_PIN);
+    
+    Serial.println("\n[ESP2] Iniciando como Servidor Ponte...");
+
+    // Conecta ao Wi-Fi
+    Serial.printf("Conectando a %s ", ssid);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nWiFi conectado!");
+    Serial.print("IP da ESP2: ");
+    Serial.println(WiFi.localIP()); // <-- ESTE É O IP PARA COLOCAR NA ESP1
+    
+    // Inicia o servidor TCP
+    server.begin();
+    Serial.printf("Servidor TCP iniciado na porta %d\n", server_port);
+    Serial.println("Aguardando conexão da ESP1...");
+}
+
+void loop() {
+    // Verifica se um novo cliente (a ESP1) se conectou
+    if (!client.connected()) {
+        client = server.available();
+        if (client) {
+            Serial.println("ESP1 conectada!");
+        }
+        return; // Se não houver cliente, volta ao início do loop
+    }
+
+    // Se o cliente estiver conectado, verifica se ele enviou dados
+    if (client.available()) {
+        // Lê a linha de dados (o JSON) enviada pela ESP1
+        String received_data = client.readStringUntil('\n');
+        received_data.trim(); // Remove espaços em branco ou caracteres invisíveis
+
+        if (received_data.length() > 0) {
+            // 1. Mostra no Monitor Serial o que foi recebido
+            Serial.print("Recebido da ESP1: ");
+            Serial.println(received_data);
+
+            // 2. Envia os mesmos dados para a STM32 via UART/Serial
+            STM32_SERIAL.println(received_data);
+            
+            // 3. (Opcional) Envia uma confirmação de volta para a ESP1
+            client.println("ACK");
+        }
+    }
+
+    // Verifica se o cliente desconectou
+    if (!client.connected()) {
+        Serial.println("ESP1 desconectada.");
+        client.stop();
+    }
+}
