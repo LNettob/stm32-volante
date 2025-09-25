@@ -1,0 +1,97 @@
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <ArduinoJson.h>
+
+// --- Configurações de Rede ---
+const char* ssid = "iPhone";
+const char* password = "luquinhas";
+// IMPORTANTE: Coloque aqui o IP que a ESP2 vai receber.
+// Você verá o IP da ESP2 no Monitor Serial dela quando ligá-la.
+const char* esp2_server_ip = "192.168.1.104"; // <-- MUDE AQUI PARA O IP DA SUA ESP2
+const uint16_t esp2_server_port = 80;
+
+// --- Variáveis Globais ---
+WiFiClient client;
+StaticJsonDocument<128> doc;
+char jsonBuffer[128];
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 200; // Envia dados a cada 200ms
+
+void setupWiFi() {
+    Serial.begin(115200);
+    Serial.print("Conectando a ");
+    Serial.println(ssid);
+
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nWiFi conectado!");
+    Serial.print("IP da ESP1: ");
+    Serial.println(WiFi.localIP());
+}
+
+void connectToServer() {
+    Serial.print("Conectando ao servidor da ESP2 em ");
+    Serial.print(esp2_server_ip);
+    Serial.print(":");
+    Serial.println(esp2_server_port);
+
+    if (client.connect(esp2_server_ip, esp2_server_port)) {
+        Serial.println("Conexao com a ESP2 estabelecida!");
+    } else {
+        Serial.println("Falha na conexao com a ESP2.");
+    }
+}
+
+void generateAndSendJSON() {
+    // Simula os valores do joystick
+    float v0_val = 1.65f + sin(millis() / 500.0f) * 1.65f;
+    float v1_val = 1.65f + cos(millis() / 750.0f) * 1.65f;
+
+    v0_val = constrain(v0_val, 0.0f, 3.3f);
+    v1_val = constrain(v1_val, 0.0f, 3.3f);
+
+    doc.clear();
+    doc["type"] = "adc";
+    doc["v0"] = v0_val;
+    doc["v1"] = v1_val;
+
+    serializeJson(doc, jsonBuffer);
+
+    // Envia o JSON para a ESP2
+    client.println(jsonBuffer);
+    
+    Serial.print("Enviando dados para ESP2: ");
+    Serial.println(jsonBuffer);
+}
+
+void setup() {
+    setupWiFi();
+}
+
+void loop() {
+    // Se não estiver conectado, tenta conectar
+    if (!client.connected()) {
+        connectToServer();
+        // Espera um pouco antes de tentar de novo para não sobrecarregar
+        if(!client.connected()){
+             delay(1000);
+             return;
+        }
+    }
+
+    // Se estiver conectado, envia os dados no intervalo definido
+    if (client.connected() && (millis() - lastSendTime >= sendInterval)) {
+        lastSendTime = millis();
+        generateAndSendJSON();
+    }
+    
+    // Opcional: Verifica se a ESP2 enviou alguma resposta
+    while (client.available()) {
+        String response = client.readStringUntil('\n');
+        Serial.print("Resposta da ESP2: ");
+        Serial.println(response);
+    }
+}
